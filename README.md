@@ -1,5 +1,5 @@
-# ✿ Hanami Agent
-
+# <img src="./hanami-blossom.png" width="96" alt="Hanami Products blossom logo" /> Hanami Agent
+https://github.com/samliumay/hanami_agent/pull/1/conflict?name=README.md&ancestor_oid=8123571886db1d4c3538fd7e3434949738584ee2&base_oid=99471b7ace9c4a2e23f8200a6cb4f2f7b197158f&head_oid=b91b2b50b4a554883f8285af5bd0f4a38e98835b
 [![CI](https://github.com/samliumay/hanami_agent/actions/workflows/ci.yml/badge.svg)](https://github.com/samliumay/hanami_agent/actions/workflows/ci.yml)
 ![version](https://img.shields.io/badge/version-0.1.0-blue)
 
