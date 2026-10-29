@@ -71,6 +71,7 @@ impl std::fmt::Display for ProviderKind {
     }
 }
 
+#[derive(Clone)]
 pub struct ProviderConfig {
     pub kind: ProviderKind,
     pub model: String,

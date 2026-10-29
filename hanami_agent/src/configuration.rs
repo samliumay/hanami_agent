@@ -23,12 +23,14 @@ impl std::fmt::Display for ConfigurationStyle {
     }
 }
 
-/// Returns (kind, api_key, model), or None if the user cancelled.
-pub fn configure(
+/// Returns `(kind, api_key, model)`, or `None` if the user cancelled or the `.env` file was invalid.
+///
+/// Marked `async` because the `Env` branch uses `tokio::fs` to create `.hanami/` and read `.env`.
+pub async fn configure(
     style: ConfigurationStyle,
-) -> Option<(ProviderKind, Option<String>, &'static str)> {
+) -> Option<(ProviderKind, Option<String>, String)> {
     match style {
-        ConfigurationStyle::Env => Some(env_config::load()),
+        ConfigurationStyle::Env => env_config::load().await,
         ConfigurationStyle::Manual => manual_config::load(),
     }
 }

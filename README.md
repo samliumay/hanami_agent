@@ -11,10 +11,11 @@ your machine (read and write files, run shell commands) to get things done.
 
 ## Features
 
-- Pick a provider and model in the terminal. API keys are typed in masked and never stored.
+- Configure interactively in the terminal (`Manual`, with masked API keys) or load from a `.env` file (`Env`, defaulting to `.hanami/.env`).
 - Multi-turn chat with tool calling (up to 10 tool rounds per message).
+- Specialized **subagents** (`explorer` for read-only research, `coder` for making changes) with isolated context and toolsets.
 - `@path/to/file` in a message attaches that file, with path autocomplete.
-- `write_file` and `run_command` ask for your approval before they run.
+- `write_file`, `edit_file`, `run_command`, and reading files outside the workspace ask for your approval before they run.
 - Minimal by design: no web search tool. The model can use `curl` through `run_command` when it
   needs the web.
 
@@ -28,15 +29,18 @@ your machine (read and write files, run shell commands) to get things done.
 | Ollama (local, `localhost:11434`) | ✅ chat + tools |
 | DeepSeek                          | ✅ chat + tools |
 | GLM (Z.ai)                        | ✅ chat + tools |
+| Moonshot Kimi                     | ✅ chat + tools |
 
 ## Tools
 
-| Tool               | What it does                                    |
-| ------------------ | ----------------------------------------------- |
-| `get_current_time` | Returns the local date and time                 |
-| `read_file`        | Reads a text file                               |
-| `write_file`       | Creates or overwrites a file (asks first)       |
-| `run_command`      | Runs a shell command, 30 s timeout (asks first) |
+| Tool               | What it does                                                          |
+| ------------------ | --------------------------------------------------------------------- |
+| `get_current_time` | Returns the local/UTC date and time                                   |
+| `read_file`        | Reads a text file (free inside the workspace, asks first outside)     |
+| `write_file`       | Creates or overwrites a file (asks first)                             |
+| `edit_file`        | Replaces old text with new text in an existing file (asks first)      |
+| `run_command`      | Runs a shell command, 30 s timeout (asks first)                       |
+| `create_subagent`  | Spawns an isolated subagent (`explorer` or `coder`) for a subtask     |
 
 ## Quick start
 
@@ -48,8 +52,10 @@ cd hanami_agent/hanami_agent
 cargo run --release
 ```
 
-Choose a provider, enter your API key (not needed for Ollama), choose a model and start chatting.
-Lines starting with `[tool]` show the tools the model runs. Type `/exit` to quit.
+At startup, choose **`Manual`** (pick provider, API key, and model in the menu) or **`Env`** (loads `PROVIDER`, `MODEL`, and `API_KEY` from `.hanami/.env` or a custom `.env` path).
+Lines starting with `[main -> tool]` (or `[explorer -> tool]` / `[coder -> tool]`) show the tools the agent runs. Type `/exit` to quit.
+
+See [`docs/README.md`](docs/README.md) for an overview of the codebase and module architecture.
 
 `run_command` uses `sh`, so it works on Linux and macOS but not on Windows yet. Even with the
 approval prompts, it's best to run Hanami Agent in a folder you don't mind changing.
@@ -66,7 +72,9 @@ keys need the `api/coding/paas/v4` URL in `src/providers/glm.rs`.
 
 - [x] Basic function calls and the base of the project.
 - [x] Chat loop, tool calling, approval prompts, `@file` mentions
-- [x] Gemini, Claude, OpenAI, Ollama, DeepSeek and GLM providers
+- [x] Gemini, Claude, OpenAI, Ollama, DeepSeek, GLM and Kimi providers
 - [x] `edit_file` tool
-- [ ] API keys from environment variables
+- [x] Configuration & API keys from `.env` file (`.hanami/.env`)
+- [x] Subagent system (`create_subagent` with `explorer` and `coder`)
+- [ ] Dynamic file-based subagent definitions in `.hanami/agents/`
 - [ ] Windows support, streaming responses, better tests

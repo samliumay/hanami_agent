@@ -1,10 +1,12 @@
 mod edit_file;
 mod read_file;
 mod run_command;
+mod spawn_agent;
 mod time;
 mod write_file;
 
 use crate::helpers::for_terminal;
+use crate::providers::ProviderConfig;
 use inquire::{Select, error::InquireError};
 
 pub struct ToolSpec {
@@ -30,6 +32,7 @@ pub fn specs() -> Vec<ToolSpec> {
         write_file::spec(),
         run_command::spec(),
         edit_file::spec(),
+        spawn_agent::spec(),
     ]
 }
 
@@ -45,7 +48,7 @@ fn needs_aproval(call: &ToolCall) -> bool {
     }
 }
 
-pub async fn execute(call: &ToolCall) -> String {
+pub async fn execute(call: &ToolCall, config: &ProviderConfig) -> String {
     //Not sure &call.name or call.name.
     if needs_aproval(call) {
         let options_for_tool_call: Vec<&str> = vec!["yes", "no"];
@@ -83,6 +86,7 @@ pub async fn execute(call: &ToolCall) -> String {
         "write_file" => write_file::run(&call.args).await,
         "run_command" => run_command::run(&call.args).await,
         "edit_file" => edit_file::run(&call.args).await,
+        "create_subagent" => spawn_agent::run(&call.args, config).await,
         other => format!("Error: unknown tool '{other}'"),
     }
 }
