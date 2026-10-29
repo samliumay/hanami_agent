@@ -3,7 +3,7 @@ use inquire::{Password, PasswordDisplayMode, Select};
 
 /// Asks the user for provider, API key and model.
 /// Returns None when the user cancels a prompt (Ctrl+C / Esc).
-pub fn load() -> Option<(ProviderKind, Option<String>, &'static str)> {
+pub fn load() -> Option<(ProviderKind, Option<String>, String)> {
     let kind = Select::new(
         "Which provider are you going with?",
         ProviderKind::ALL.to_vec(),
@@ -31,5 +31,7 @@ pub fn load() -> Option<(ProviderKind, Option<String>, &'static str)> {
         .prompt()
         .ok()?;
 
-    Some((kind, api_key, model))
+    // Convert `&'static str` from the menu into an owned `String` so both
+    // `manual_config::load` and `env_config::load` return the exact same type.
+    Some((kind, api_key, model.to_string()))
 }

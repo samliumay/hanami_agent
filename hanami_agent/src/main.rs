@@ -1,3 +1,4 @@
+mod agents;
 mod configuration;
 mod helpers;
 mod providers;
@@ -6,11 +7,26 @@ mod tools;
 use configuration::ConfigurationStyle;
 use helpers::{MentionCompleter, expand_mentions, for_terminal};
 use inquire::{Select, Text};
-use providers::{ChatMessage, ProviderConfig, Reply};
+use providers::{ChatMessage, ProviderConfig};
 
 #[tokio::main]
 async fn main() {
     println!("Kuzey Agent 0.1.0");
+
+    // First-run check: ensure `.hanami/` and `.hanami/.env` exist before asking anything.
+    match configuration::env_config::ensure_initialized().await {
+        Ok(true) => {
+            println!(
+                "First run detected: created '{}'.",
+                configuration::env_config::DEFAULT_ENV_PATH
+            );
+        }
+        Ok(false) => {}
+        Err(e) => {
+            println!("Error initializing .hanami directory: {e}");
+            return;
+        }
+    }
 
     let Ok(env_or_manual_config) = Select::new(
         "Will you configure the system by yourself or you will reference the env file.",
@@ -21,12 +37,12 @@ async fn main() {
         return;
     };
 
-    let Some((kind, api_key, model)) = configuration::configure(env_or_manual_config) else {
+    let Some((kind, api_key, model)) = configuration::configure(env_or_manual_config).await else {
         println!("Exiting...");
         return;
     };
 
-    let provider_details = ProviderConfig::new(kind, model.to_string(), api_key);
+    let provider_details = ProviderConfig::new(kind, model, api_key);
 
     let tool_specs = tools::specs();
     let mut history: Vec<ChatMessage> = Vec::new();
@@ -54,48 +70,16 @@ async fn main() {
         let turn_start = history.len();
         history.push(ChatMessage::User(expand_mentions(input)));
 
-        // Inner loop: keep going while the model asks for tools.
-        // It ends when the model answers with text (or after 10 rounds).
-
-        let mut was_tool_call_sucsefull: bool = false;
-
-        for _ in 0..10 {
-            match providers::send(&provider_details, &history, &tool_specs).await {
-                Ok(Reply::Text(text)) => {
-                    println!("{}", for_terminal(&text));
-                    history.push(ChatMessage::Assistant(text));
-                    was_tool_call_sucsefull = true;
-                    break;
-                }
-                Ok(Reply::ToolCalls { calls, reasoning }) => {
-                    let mut results = Vec::new();
-                    for call in &calls {
-                        println!("[tool] {} {}", for_terminal(&call.name), call.args);
-                        let output = tools::execute(call).await;
-                        results.push(ChatMessage::ToolResult {
-                            id: call.id.clone(),
-                            name: call.name.clone(),
-                            output,
-                        });
-                    }
-                    history.push(ChatMessage::ToolCalls { calls, reasoning });
-                    //This part is kinda wierd. why not push results?
-                    history.extend(results);
-                }
-                Err(e) => {
-                    println!("Error {e}");
-                    // pop() removed only the last item. After a tool round that left a
-                    // ToolCalls without its ToolResult, and OpenAI/Anthropic reject such a
-                    // history on every later request. Drop the whole turn instead.
-                    history.truncate(turn_start);
-                    was_tool_call_sucsefull = true;
-                    break;
-                }
+        // Run the shared agent loop (up to 10 rounds of tool calls).
+        match agents::run(&provider_details, &mut history, &tool_specs, "main", 10).await {
+            Ok(text) => {
+                println!("{}", for_terminal(&text));
             }
-        }
-
-        if !was_tool_call_sucsefull {
-            println!("ToolCallTrials was not sucsesfull! Check the configuration!");
+            Err(e) => {
+                println!("Error {e}");
+                // Drop the whole failed turn so history never ends with a dangling ToolCalls.
+                history.truncate(turn_start);
+            }
         }
     }
 }
