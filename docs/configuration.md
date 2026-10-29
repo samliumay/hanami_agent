@@ -31,18 +31,22 @@ Returning `None` (e.g., user pressed `Ctrl+C`/`Esc` or `.env` was missing requir
 Defines `ConfigurationStyle` (`Env` | `Manual`) and dispatches via `pub async fn configure(style)`.
 
 ### 2. `configuration/env_config.rs`
-Handles first-run initialization and reading/saving `.hanami/.env` (or a custom path):
-1. **First-run check at startup (`ensure_initialized()`)**: Called first in `main.rs`. It checks `tokio::fs::try_exists(".hanami/.env").await`.
-   - If `.hanami/.env` does **not** exist (first run), it creates `.hanami/` (`tokio::fs::create_dir_all`) and creates an empty `.hanami/.env` template (`tokio::fs::write`).
-   - If `.hanami/.env` already exists, it does nothing.
-2. **Loading (`load()`)**: Ensures the selected `.env` file exists, reads it with `tokio::fs::read_to_string(&path).await`, and parses `KEY=VALUE` lines using `line.split_once('=')`.
-3. **Interactive fallback & save**: If `PROVIDER`, `MODEL`, or (when required) `API_KEY` are missing in the `.env` file, it prompts the user via `manual_config::load()` and saves their answers into the `.env` file with `tokio::fs::write` so future runs load automatically.
+Handles first-run initialization and per-provider API keys in `.hanami/.env` (or a custom path):
+1. **First-run check at startup (`ensure_initialized()`)**: Called first in `main.rs`. Checks `tokio::fs::try_exists(".hanami/.env").await`.
+   - If `.hanami/.env` does **not** exist (first run), creates `.hanami/` and writes an empty `.hanami/.env` template with keys for each provider (`ANTHROPIC_API_KEY=`, `GOOGLE_API_KEY=`, etc.).
+   - If `.hanami/.env` already exists, does nothing.
+2. **Provider menu with status (`load()`)**: Reads the `.env` file into a `HashMap` and asks which provider you want to move with, displaying **`(configured)`** or **`(not configured)`** next to every provider entry (`ProviderEntry`).
+3. **Prompt & save on missing key**: If you pick a provider that is `(not configured)`, it asks for that provider's API key (masked) and writes the updated key map back to the `.env` file so it shows up as `(configured)` on future runs.
 
 #### Example `.hanami/.env`
 ```env
-PROVIDER=google
-MODEL=gemini-2.5-flash
-API_KEY=your_api_key_here
+# Hanami Agent API Keys
+ANTHROPIC_API_KEY=
+GOOGLE_API_KEY=your_api_key_here
+OPENAI_API_KEY=
+DEEPSEEK_API_KEY=
+GLM_API_KEY=
+KIMI_API_KEY=
 ```
 
 ### 3. `configuration/manual_config.rs`

@@ -1,38 +1,62 @@
-//! Reads provider, API key, and model configuration from a `.env` file.
+//! Reads and saves provider API keys in `.hanami/.env` (or a custom `.env` file).
 //!
-//! - On the very first run, Hanami checks whether `.hanami/.env` exists. If not, it creates
-//!   `.hanami/` and an empty `.hanami/.env` template.
-//! - When loading the `.env` file, if the required keys (`PROVIDER`, `MODEL`, or `API_KEY`)
-//!   are missing or empty, Hanami prompts the user to choose a provider/key/model and saves
-//!   the answers back into the `.env` file for future runs.
+//! - **Startup check (`ensure_initialized`)**: Checks if `.hanami/.env` exists to detect
+//!   whether this is the first run. If missing, creates `.hanami/` and an empty `.hanami/.env`.
+//! - **Provider selection (`load`)**: Reads the `.env` file and shows every provider in a menu
+//!   along with its status (`[configured]` or `[not configured]`).
+//! - **Auto-save missing keys**: If the user selects a provider that is `[not configured]`,
+//!   Hanami prompts for that provider's API key and saves it into the `.env` file for future runs.
 
-use super::manual_config;
 use crate::providers::ProviderKind;
-use inquire::{Select, Text};
+use inquire::{Password, PasswordDisplayMode, Select, Text};
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Default location for the environment configuration file inside the workspace.
 pub const DEFAULT_ENV_PATH: &str = ".hanami/.env";
 
-/// Empty template written when `.hanami/.env` is first created.
+/// Empty template written when `.hanami/.env` is created on the first run.
 const EMPTY_ENV_TEMPLATE: &str = "\
-# Hanami Agent Configuration
-# Available providers: ollama, anthropic, google, openai, deepseek, glm, kimi
-PROVIDER=
-MODEL=
-API_KEY=
+# Hanami Agent API Keys
+ANTHROPIC_API_KEY=
+GOOGLE_API_KEY=
+OPENAI_API_KEY=
+DEEPSEEK_API_KEY=
+GLM_API_KEY=
+KIMI_API_KEY=
 ";
 
-/// Formats the chosen `(kind, api_key, model)` into `.env` file content.
-fn format_env_content(kind: ProviderKind, api_key: Option<&str>, model: &str) -> String {
-    let key_str = api_key.unwrap_or("");
-    format!(
-        "# Hanami Agent Configuration\n\
-         # Available providers: ollama, anthropic, google, openai, deepseek, glm, kimi\n\
-         PROVIDER={kind}\n\
-         MODEL={model}\n\
-         API_KEY={key_str}\n"
-    )
+/// Maps each provider to its corresponding environment variable name in `.env`.
+/// Returns `None` for Ollama because it runs locally without an API key.
+fn env_key_for(kind: ProviderKind) -> Option<&'static str> {
+    match kind {
+        ProviderKind::Ollama => None,
+        ProviderKind::Anthropic => Some("ANTHROPIC_API_KEY"),
+        ProviderKind::Google => Some("GOOGLE_API_KEY"),
+        ProviderKind::OpenAI => Some("OPENAI_API_KEY"),
+        ProviderKind::Deepseek => Some("DEEPSEEK_API_KEY"),
+        ProviderKind::GLM => Some("GLM_API_KEY"),
+        ProviderKind::Kimi => Some("KIMI_API_KEY"),
+    }
+}
+
+/// A menu item for `inquire::Select` that displays both the provider name and
+/// whether its API key is already configured in the `.env` file.
+#[derive(Clone, Copy)]
+struct ProviderEntry {
+    kind: ProviderKind,
+    configured: bool,
+}
+
+impl std::fmt::Display for ProviderEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let status = if self.configured {
+            "configured"
+        } else {
+            "not configured"
+        };
+        write!(f, "{} ({status})", self.kind)
+    }
 }
 
 /// Checks at program startup whether `.hanami/.env` exists to detect the first run.
@@ -64,25 +88,47 @@ async fn create_env_file_if_missing(path: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Converts a raw string from the `.env` file (e.g. `"Google"` or `"ollama"`)
-/// into our [`ProviderKind`] enum.
-fn parse_provider(value: &str) -> Option<ProviderKind> {
-    match value.trim().to_lowercase().as_str() {
-        "ollama" => Some(ProviderKind::Ollama),
-        "anthropic" => Some(ProviderKind::Anthropic),
-        "google" => Some(ProviderKind::Google),
-        "openai" => Some(ProviderKind::OpenAI),
-        "deepseek" => Some(ProviderKind::Deepseek),
-        "glm" => Some(ProviderKind::GLM),
-        "kimi" => Some(ProviderKind::Kimi),
-        _ => None,
+/// Parses non-empty `KEY=VALUE` pairs from `.env` text into a `HashMap`.
+fn parse_env_map(content: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        // `split_once('=')` splits at the FIRST `=` only so base64 keys with `=` stay intact.
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+
+        let key = key.trim();
+        let value = value.trim().trim_matches('"').trim_matches('\'');
+
+        if !key.is_empty() && !value.is_empty() {
+            map.insert(key.to_string(), value.to_string());
+        }
     }
+
+    map
 }
 
-/// Reads a `KEY=VALUE` env file asynchronously and returns `(kind, api_key, model)`.
-///
-/// If the `.env` file is missing `PROVIDER`, `MODEL`, or a required `API_KEY`, this function
-/// prompts the user interactively (via [`manual_config::load`]) and saves their answers to `path`.
+/// Serializes the `HashMap` of keys back into `.env` format so all configured providers stay saved.
+fn serialize_env_map(keys: &HashMap<String, String>) -> String {
+    let mut out = String::from("# Hanami Agent API Keys\n");
+    for kind in ProviderKind::ALL {
+        if let Some(env_key) = env_key_for(kind) {
+            let val = keys.get(env_key).map(String::as_str).unwrap_or("");
+            out.push_str(&format!("{env_key}={val}\n"));
+        }
+    }
+    out
+}
+
+/// Loads provider API keys from `.hanami/.env` (or a custom path), shows each provider's
+/// configuration status in the selection menu, prompts & saves the key if an unconfigured
+/// provider is chosen, and asks which model to use.
 pub async fn load() -> Option<(ProviderKind, Option<String>, String)> {
     // 1. Ask if we should use `.hanami/.env` or a custom path.
     let choice = Select::new(
@@ -108,7 +154,7 @@ pub async fn load() -> Option<(ProviderKind, Option<String>, String)> {
         return None;
     }
 
-    // 3. Read the entire file into a `String` asynchronously with Tokio.
+    // 3. Read the `.env` file and parse configured keys.
     let content = match tokio::fs::read_to_string(&path).await {
         Ok(text) => text,
         Err(e) => {
@@ -116,56 +162,64 @@ pub async fn load() -> Option<(ProviderKind, Option<String>, String)> {
             return None;
         }
     };
+    let mut keys = parse_env_map(&content);
 
-    // 4. Parse `KEY=VALUE` lines.
-    let mut provider: Option<ProviderKind> = None;
-    let mut api_key: Option<String> = None;
-    let mut model: Option<String> = None;
+    // 4. Build the provider menu showing `(configured)` or `(not configured)` on every entry.
+    let entries: Vec<ProviderEntry> = ProviderKind::ALL
+        .iter()
+        .map(|&kind| {
+            let configured = match env_key_for(kind) {
+                None => true, // Ollama needs no key, so it is always ready.
+                Some(env_key) => keys.contains_key(env_key),
+            };
+            ProviderEntry { kind, configured }
+        })
+        .collect();
 
-    for line in content.lines() {
-        let line = line.trim();
-        // Skip blank lines and `#` comments.
-        if line.is_empty() || line.starts_with('#') {
-            continue;
+    let chosen = Select::new("Which provider do you want to move with?", entries)
+        .prompt()
+        .ok()?;
+    let kind = chosen.kind;
+
+    // 5. Get the API key from `.env`, or ask for it and save it to `.env` if missing.
+    let api_key = match env_key_for(kind) {
+        None => None,
+        Some(env_key) => {
+            if let Some(existing_key) = keys.get(env_key) {
+                Some(existing_key.clone())
+            } else {
+                let new_key = Password::new(&format!(
+                    "'{kind}' is not configured in '{path}'. Please enter your {env_key}:"
+                ))
+                .with_display_mode(PasswordDisplayMode::Masked)
+                .without_confirmation()
+                .prompt()
+                .ok()?;
+
+                let new_key = new_key.trim().to_string();
+                if new_key.is_empty() {
+                    println!("Error: API key cannot be empty for '{kind}'.");
+                    return None;
+                }
+
+                // Save the newly entered key into the map and write back to `.env`.
+                keys.insert(env_key.to_string(), new_key.clone());
+                let updated_env = serialize_env_map(&keys);
+                if let Err(e) = tokio::fs::write(&path, updated_env).await {
+                    println!("Warning: could not save key to '{path}': {e}");
+                } else {
+                    println!("Saved {env_key} to '{path}'.");
+                }
+
+                Some(new_key)
+            }
         }
-
-        // `split_once('=')` splits at the FIRST `=` only.
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-
-        let key = key.trim();
-        // Strip optional surrounding quotes: `MODEL="gemini-2.5-flash"` -> `gemini-2.5-flash`
-        let value = value.trim().trim_matches('"').trim_matches('\'');
-
-        match key {
-            "PROVIDER" if !value.is_empty() => provider = parse_provider(value),
-            "API_KEY" if !value.is_empty() => api_key = Some(value.to_string()),
-            "MODEL" if !value.is_empty() => model = Some(value.to_string()),
-            _ => {}
-        }
-    }
-
-    // 5. Check if all required keys are present in the `.env` file.
-    //    If any required key is missing, ask the user and save the answers to `.env`.
-    let has_valid_config = match (&provider, &model) {
-        (Some(kind), Some(_)) => !kind.needs_api_key() || api_key.is_some(),
-        _ => false,
     };
 
-    if has_valid_config {
-        return Some((provider.unwrap(), api_key, model.unwrap()));
-    }
+    // 6. Ask which model to use for the selected provider.
+    let model = Select::new("Which model do you want to use?", kind.models())
+        .prompt()
+        .ok()?;
 
-    println!("'{path}' is missing configuration keys. Let's set it up and save to '{path}':");
-    let (kind, api_key, model) = manual_config::load()?;
-
-    let new_content = format_env_content(kind, api_key.as_deref(), &model);
-    if let Err(e) = tokio::fs::write(&path, new_content).await {
-        println!("Warning: could not save configuration to '{path}': {e}");
-    } else {
-        println!("Saved configuration to '{path}'.");
-    }
-
-    Some((kind, api_key, model))
+    Some((kind, api_key, model.to_string()))
 }

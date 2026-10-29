@@ -52,7 +52,11 @@ cd hanami_agent/hanami_agent
 cargo run --release
 ```
 
-At startup, choose **`Manual`** (pick provider, API key, and model in the menu) or **`Env`** (loads `PROVIDER`, `MODEL`, and `API_KEY` from `.hanami/.env` or a custom `.env` path).
+At startup, Hanami checks whether `.hanami/.env` exists (creating `.hanami/` and an empty `.hanami/.env` on the first run), then asks how you want to configure the session:
+
+- **`Env`**: Reads `.hanami/.env` (or a custom `.env` path) and asks **which provider you want to move with**, showing **`(configured)`** or **`(not configured)`** next to every provider entry. If you choose a provider that is `(not configured)`, Hanami prompts for its API key and saves it into the `.env` file for future runs.
+- **`Manual`**: Prompts for the provider, API key (masked, never stored on disk), and model for this session only.
+
 Lines starting with `[main -> tool]` (or `[explorer -> tool]` / `[coder -> tool]`) show the tools the agent runs. Type `/exit` to quit.
 
 See [`docs/README.md`](docs/README.md) for an overview of the codebase and module architecture.
